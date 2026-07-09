@@ -1,19 +1,42 @@
-# TMDB 自动订阅插件市场
+# MoviePilot-Plugins
 
-这是一个 MoviePilot 第三方插件市场仓库，只包含 `TMDB自动订阅` 插件。
+这是 `01dmt` 维护的 MoviePilot 第三方插件库。
 
-## 使用方式
+仓库采用 MoviePilot 插件市场常见结构：根目录维护 `package.v2.json` 插件索引，插件代码放在 `plugins.v2/<plugin_id>/` 下。后续新增插件时，只需要继续添加插件目录并更新 `package.v2.json`。
 
-1. 将本目录推送到 GitHub 仓库的 `main` 分支。
-2. 在 MoviePilot 插件市场设置里添加该 GitHub 仓库地址。
-3. 刷新插件市场，安装 `TMDB自动订阅`。
+## 插件列表
 
-## 插件路径
+| 插件 | 目录 | 说明 |
+| --- | --- | --- |
+| TMDB自动订阅 | `plugins.v2/tmdbautosubscribe` | 按 TMDB 新上映、新剧首播和老剧新季生成 MoviePilot 订阅建议，支持自动订阅、筛选配置、扫描进度和海报墙调试。 |
+
+## MoviePilot 使用方式
+
+1. 在 MoviePilot 插件市场设置中添加本仓库地址：
+
+   ```text
+   https://github.com/01dmt/MoviePilot-Plugins
+   ```
+
+2. 刷新插件市场。
+3. 安装需要的插件，例如 `TMDB自动订阅`。
+
+## 仓库结构
 
 ```text
-plugins.v2/tmdbautosubscribe
+MoviePilot-Plugins/
+├─ package.v2.json
+└─ plugins.v2/
+   └─ tmdbautosubscribe/
+      ├─ __init__.py
+      └─ README.md
 ```
 
-## 版本
+## 本地校验
 
-- `v1.0.0`：支持电影、新剧首播、老剧新季、缓存观察、筛选配置、扫描进度和海报墙调试。
+插件发布前建议执行：
+
+```powershell
+python -m json.tool package.v2.json > $null
+python -m compileall plugins.v2
+```
