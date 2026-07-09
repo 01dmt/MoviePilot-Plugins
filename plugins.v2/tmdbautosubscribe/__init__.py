@@ -440,7 +440,7 @@ class TmdbAutoSubscribe(_PluginBase):
     plugin_name = "TMDB自动订阅"
     plugin_desc = "按 TMDB 新上映、新剧首播和老剧新季生成 MoviePilot 订阅建议，支持自动订阅、缓存和细分筛选。"
     plugin_icon = "https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_1-5d5314d5e79cdcbcb8c8e5e0777f728adc9f28f36375f15e3ed536e37a334f6c.svg"
-    plugin_version = "1.0.2"
+    plugin_version = "1.0.3"
     plugin_author = "Codex"
     author_url = "https://github.com/jxxghp/MoviePilot"
     plugin_config_prefix = "tmdbautosubscribe_"
@@ -1691,31 +1691,17 @@ class TmdbAutoSubscribe(_PluginBase):
 
     def _filter_options(self, config: Dict[str, Any]) -> Dict[str, List[Dict[str, str]]]:
         cached = self.get_data("tmdb_filter_options") or {}
-        if self._filter_options_cache_valid(cached):
-            return cached.get("options") or self._fallback_filter_options()
+        options = cached.get("options")
+        if options:
+            return options
 
-        try:
-            client = self._tmdb_client(config)
-            options = {
-                "movie_genres": self._genre_options(client.movie_genres(), MOVIE_GENRE_LABELS, "movie_genres"),
-                "tv_genres": self._genre_options(client.tv_genres(), TV_GENRE_LABELS, "tv_genres"),
-                "origin_countries": self._country_options(client.countries()),
-                "original_languages": self._language_options(client.languages()),
-            }
-            self.save_data("tmdb_filter_options", {
-                "updated_at": int(time.time()),
-                "options": options,
-            })
-            return options
-        except Exception as err:
-            options = cached.get("options") or self._fallback_filter_options()
-            self.save_data("tmdb_filter_options", {
-                "updated_at": int(time.time()),
-                "options": options,
-                "fallback": True,
-                "error": str(err),
-            })
-            return options
+        options = self._fallback_filter_options()
+        self.save_data("tmdb_filter_options", {
+            "updated_at": int(time.time()),
+            "options": options,
+            "fallback": True,
+        })
+        return options
 
     @staticmethod
     def _filter_options_cache_valid(cached: Dict[str, Any]) -> bool:
