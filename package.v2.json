@@ -3,12 +3,13 @@
     "name": "TMDB自动订阅",
     "description": "按 TMDB 新上映电影、新剧首播和老剧新季生成 MoviePilot 订阅建议，支持自动订阅、筛选配置、扫描进度和海报墙调试。",
     "labels": "订阅,TMDB,自动化",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "icon": "https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_1-5d5314d5e79cdcbcb8c8e5e0777f728adc9f28f36375f15e3ed536e37a334f6c.svg",
     "author": "Codex",
     "level": 1,
     "system_version": ">=2.12.0",
     "history": {
+      "v1.0.2": "筛选选项拉取失败时静默缓存内置常用选项，避免 TMDB 超时产生无意义日志。",
       "v1.0.1": "筛选选项拉取失败时缓存内置常用选项，避免 TMDB 超时导致配置页反复报错。",
       "v1.0.0": "V1.0 发布：支持电影、新剧首播、老剧新季、缓存观察、筛选配置、扫描进度和海报墙调试。"
     }

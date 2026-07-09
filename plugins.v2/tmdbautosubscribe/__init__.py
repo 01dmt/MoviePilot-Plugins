@@ -440,7 +440,7 @@ class TmdbAutoSubscribe(_PluginBase):
     plugin_name = "TMDB自动订阅"
     plugin_desc = "按 TMDB 新上映、新剧首播和老剧新季生成 MoviePilot 订阅建议，支持自动订阅、缓存和细分筛选。"
     plugin_icon = "https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_1-5d5314d5e79cdcbcb8c8e5e0777f728adc9f28f36375f15e3ed536e37a334f6c.svg"
-    plugin_version = "1.0.1"
+    plugin_version = "1.0.2"
     plugin_author = "Codex"
     author_url = "https://github.com/jxxghp/MoviePilot"
     plugin_config_prefix = "tmdbautosubscribe_"
@@ -1715,7 +1715,6 @@ class TmdbAutoSubscribe(_PluginBase):
                 "fallback": True,
                 "error": str(err),
             })
-            logger.warning(f"TMDB 自动订阅拉取筛选选项失败，已缓存内置常用选项：{err}")
             return options
 
     @staticmethod
