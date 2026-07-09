@@ -9,7 +9,7 @@ from threading import Event, Thread
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from urllib.request import HTTPSHandler, ProxyHandler, build_opener, urlopen
 from zoneinfo import ZoneInfo
 
 from app.chain.subscribe import SubscribeChain
@@ -239,6 +239,7 @@ class TmdbAutoClient:
             base_url: str = "https://api.themoviedb.org/3",
             timeout: int = 10,
             retries: int = 2,
+            proxy_url: Optional[str] = None,
     ):
         self.api_key = api_key
         self.language = language
@@ -247,6 +248,8 @@ class TmdbAutoClient:
         self.timeout = max(3, int(timeout or 10))
         self.retries = max(1, int(retries or 2))
         self.ssl_context = self._ssl_context()
+        self.proxy_url = str(proxy_url or "").strip()
+        self.opener = self._opener()
 
     def discover_movie(self, start: datetime.date, end: datetime.date, pages: int,
                        filters: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
@@ -396,7 +399,11 @@ class TmdbAutoClient:
         last_error: Optional[BaseException] = None
         for attempt in range(1, self.retries + 1):
             try:
-                with urlopen(url, timeout=self.timeout, context=self.ssl_context) as response:
+                if self.opener:
+                    response_ctx = self.opener.open(url, timeout=self.timeout)
+                else:
+                    response_ctx = urlopen(url, timeout=self.timeout, context=self.ssl_context)
+                with response_ctx as response:
                     return json.loads(response.read().decode("utf-8"))
             except HTTPError as err:
                 raise RuntimeError(self._format_http_error(err)) from err
@@ -435,12 +442,20 @@ class TmdbAutoClient:
         except ImportError:
             return ssl.create_default_context()
 
+    def _opener(self):
+        if not self.proxy_url:
+            return None
+        return build_opener(
+            ProxyHandler({"http": self.proxy_url, "https": self.proxy_url}),
+            HTTPSHandler(context=self.ssl_context),
+        )
+
 
 class TmdbAutoSubscribe(_PluginBase):
     plugin_name = "TMDB自动订阅"
     plugin_desc = "按 TMDB 新上映、新剧首播和老剧新季生成 MoviePilot 订阅建议，支持自动订阅、缓存和细分筛选。"
     plugin_icon = "https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_1-5d5314d5e79cdcbcb8c8e5e0777f728adc9f28f36375f15e3ed536e37a334f6c.svg"
-    plugin_version = "1.0.3"
+    plugin_version = "1.0.4"
     plugin_author = "Codex"
     author_url = "https://github.com/jxxghp/MoviePilot"
     plugin_config_prefix = "tmdbautosubscribe_"
@@ -609,6 +624,7 @@ class TmdbAutoSubscribe(_PluginBase):
                                             self._text("tmdb_api_key", "TMDB API Key", 6, "留空时尝试使用系统 TMDB 配置"),
                                             self._text("cron", "执行周期", 3, "cron，默认每天 09:00"),
                                             self._switch("clear_cache", "清空缓存", 3),
+                                            self._switch("use_proxy", "使用MP代理", 3),
                                         ]),
                                         self._row([
                                             self._number("discover_pages", "电影/新剧页数", 3),
@@ -1477,7 +1493,20 @@ class TmdbAutoSubscribe(_PluginBase):
             base_url=base_url,
             timeout=_as_int(config.get("tmdb_timeout"), 10),
             retries=_as_int(config.get("tmdb_retries"), 2),
+            proxy_url=TmdbAutoSubscribe._tmdb_proxy_url(config),
         )
+
+    @staticmethod
+    def _tmdb_proxy_url(config: Dict[str, Any]) -> Optional[str]:
+        if not _as_bool(config.get("use_proxy"), True):
+            return None
+        proxy_host = getattr(settings, "PROXY_HOST", "") or ""
+        if proxy_host:
+            return str(proxy_host)
+        proxy = getattr(settings, "PROXY", None)
+        if isinstance(proxy, dict):
+            return str(proxy.get("https") or proxy.get("http") or "") or None
+        return None
 
     @staticmethod
     def _first_regular_season(detail: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -1590,7 +1619,7 @@ class TmdbAutoSubscribe(_PluginBase):
         for key in ("media_types", "tv_genres", "movie_genres", "exclude_tv_genres", "exclude_movie_genres", "origin_countries", "original_languages"):
             merged[key] = _as_list(merged.get(key))
         merged["blacklist"] = _as_blacklist(merged.get("blacklist"))
-        for key in ("enabled", "onlyonce", "auto_subscribe", "notify", "clear_cache"):
+        for key in ("enabled", "onlyonce", "auto_subscribe", "notify", "clear_cache", "use_proxy"):
             merged[key] = _as_bool(merged.get(key), self._default_config()[key])
         for key in ("lookback_days", "lookahead_days", "min_new_items_per_page"):
             merged[key] = _clamp_int(merged.get(key), self._default_config()[key], 0)
@@ -1610,6 +1639,7 @@ class TmdbAutoSubscribe(_PluginBase):
             "auto_subscribe": False,
             "notify": False,
             "clear_cache": False,
+            "use_proxy": True,
             "tmdb_api_key": "",
             "language": "zh-CN",
             "region": "CN",
