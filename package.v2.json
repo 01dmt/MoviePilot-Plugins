@@ -1,14 +1,15 @@
 {
   "TmdbAutoSubscribe": {
     "name": "TMDB自动订阅",
-    "description": "按 TMDB 新上映、新剧首播和老剧新季生成 MoviePilot 订阅建议，支持自动订阅、筛选配置、扫描进度和海报墙调试。",
+    "description": "按 TMDB 新上映、新剧首播和老剧新季生成 MoviePilot 订阅建议，支持自动订阅、缓存和细分筛选。",
     "labels": "订阅,TMDB,自动化",
-    "version": "1.0.4",
-    "icon": "https://cdn.jsdelivr.net/gh/01dmt/MoviePilot-Plugins@main/icons/tmdbautosubscribe-256.png",
+    "version": "1.0.5",
+    "icon": "https://raw.githubusercontent.com/01dmt/MoviePilot-Plugins/9b5ba8d3d0fe32ae34fb23a9b72b47d67ce2569d/icons/tmdbautosubscribe-256.png?v=1.0.5",
     "author": "Codex",
     "level": 1,
     "system_version": ">=2.12.0",
     "history": {
+      "v1.0.5": "修复插件图标地址不在 MoviePilot 默认图片白名单中导致新图标无法显示的问题。",
       "v1.0.4": "扫描请求支持使用 MoviePilot 代理配置，改善真实环境访问 TMDB 超时的问题。",
       "v1.0.3": "配置页不再实时请求 TMDB 筛选选项，避免网络超时导致设置页打不开。",
       "v1.0.2": "筛选选项拉取失败时静默缓存内置常用选项，避免 TMDB 超时产生无意义日志。",

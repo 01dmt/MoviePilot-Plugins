@@ -454,8 +454,8 @@ class TmdbAutoClient:
 class TmdbAutoSubscribe(_PluginBase):
     plugin_name = "TMDB自动订阅"
     plugin_desc = "按 TMDB 新上映、新剧首播和老剧新季生成 MoviePilot 订阅建议，支持自动订阅、缓存和细分筛选。"
-    plugin_icon = "https://cdn.jsdelivr.net/gh/01dmt/MoviePilot-Plugins@main/icons/tmdbautosubscribe-256.png"
-    plugin_version = "1.0.4"
+    plugin_icon = "https://raw.githubusercontent.com/01dmt/MoviePilot-Plugins/9b5ba8d3d0fe32ae34fb23a9b72b47d67ce2569d/icons/tmdbautosubscribe-256.png?v=1.0.5"
+    plugin_version = "1.0.5"
     plugin_author = "Codex"
     author_url = "https://github.com/jxxghp/MoviePilot"
     plugin_config_prefix = "tmdbautosubscribe_"
