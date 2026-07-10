@@ -5,6 +5,7 @@ import ssl
 import socket
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from threading import Event, Thread
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
@@ -17,6 +18,34 @@ from app.core.config import settings
 from app.log import logger
 from app.plugins import _PluginBase
 from app.schemas.types import MediaType, NotificationType
+
+
+PLUGIN_ICON_NAME = "tmdbautosubscribe.svg"
+PLUGIN_ICON_DIR = Path("/public/plugin_icon")
+
+
+def _install_bundled_plugin_icon(target_dir: Optional[Path] = None) -> bool:
+    source = Path(__file__).with_name(PLUGIN_ICON_NAME)
+    destination_dir = Path(target_dir) if target_dir is not None else PLUGIN_ICON_DIR
+    if not source.is_file() or not destination_dir.is_dir():
+        return False
+
+    destination = destination_dir / PLUGIN_ICON_NAME
+    try:
+        content = source.read_bytes()
+        if destination.is_file() and destination.read_bytes() == content:
+            return True
+
+        temporary = destination.with_name(f".{PLUGIN_ICON_NAME}.tmp")
+        temporary.write_bytes(content)
+        temporary.replace(destination)
+        return True
+    except OSError as error:
+        logger.warning(f"TMDB自动订阅写入本地图标失败：{error}")
+        return False
+
+
+_install_bundled_plugin_icon()
 
 
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
@@ -454,8 +483,8 @@ class TmdbAutoClient:
 class TmdbAutoSubscribe(_PluginBase):
     plugin_name = "TMDB自动订阅"
     plugin_desc = "按 TMDB 新上映、新剧首播和老剧新季生成 MoviePilot 订阅建议，支持自动订阅、缓存和细分筛选。"
-    plugin_icon = "https://raw.githubusercontent.com/01dmt/MoviePilot-Plugins/9b5ba8d3d0fe32ae34fb23a9b72b47d67ce2569d/icons/tmdbautosubscribe-256.png?v=1.0.6"
-    plugin_version = "1.0.6"
+    plugin_icon = PLUGIN_ICON_NAME
+    plugin_version = "1.0.7"
     plugin_author = "01dmt"
     author_url = "https://github.com/01dmt"
     plugin_config_prefix = "tmdbautosubscribe_"
