@@ -13,6 +13,8 @@ from urllib.parse import urlencode
 from urllib.request import HTTPSHandler, ProxyHandler, build_opener, urlopen
 from zoneinfo import ZoneInfo
 
+from fastapi.responses import Response
+
 from app.chain.subscribe import SubscribeChain
 from app.core.config import settings
 from app.log import logger
@@ -20,32 +22,21 @@ from app.plugins import _PluginBase
 from app.schemas.types import MediaType, NotificationType
 
 
-PLUGIN_ICON_NAME = "tmdbautosubscribe.svg"
-PLUGIN_ICON_DIR = Path("/public/plugin_icon")
+PLUGIN_ICON_ASSET = "tmdbautosubscribe.svg"
+PLUGIN_ICON_URL = "../api/v1/plugin/TmdbAutoSubscribe/icon?v=1.0.8"
 
 
-def _install_bundled_plugin_icon(target_dir: Optional[Path] = None) -> bool:
-    source = Path(__file__).with_name(PLUGIN_ICON_NAME)
-    destination_dir = Path(target_dir) if target_dir is not None else PLUGIN_ICON_DIR
-    if not source.is_file() or not destination_dir.is_dir():
-        return False
-
-    destination = destination_dir / PLUGIN_ICON_NAME
+def _plugin_icon_response() -> Response:
+    source = Path(__file__).with_name(PLUGIN_ICON_ASSET)
     try:
-        content = source.read_bytes()
-        if destination.is_file() and destination.read_bytes() == content:
-            return True
-
-        temporary = destination.with_name(f".{PLUGIN_ICON_NAME}.tmp")
-        temporary.write_bytes(content)
-        temporary.replace(destination)
-        return True
+        return Response(
+            content=source.read_bytes(),
+            media_type="image/svg+xml",
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
     except OSError as error:
-        logger.warning(f"TMDB自动订阅写入本地图标失败：{error}")
-        return False
-
-
-_install_bundled_plugin_icon()
+        logger.error(f"TMDB自动订阅读取内置图标失败：{error}")
+        return Response(status_code=404)
 
 
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
@@ -483,8 +474,8 @@ class TmdbAutoClient:
 class TmdbAutoSubscribe(_PluginBase):
     plugin_name = "TMDB自动订阅"
     plugin_desc = "按 TMDB 新上映、新剧首播和老剧新季生成 MoviePilot 订阅建议，支持自动订阅、缓存和细分筛选。"
-    plugin_icon = PLUGIN_ICON_NAME
-    plugin_version = "1.0.7"
+    plugin_icon = PLUGIN_ICON_URL
+    plugin_version = "1.0.8"
     plugin_author = "01dmt"
     author_url = "https://github.com/01dmt"
     plugin_config_prefix = "tmdbautosubscribe_"
@@ -566,6 +557,14 @@ class TmdbAutoSubscribe(_PluginBase):
 
     def get_api(self) -> List[Dict[str, Any]]:
         return [
+            {
+                "path": "/icon",
+                "endpoint": _plugin_icon_response,
+                "methods": ["GET"],
+                "allow_anonymous": True,
+                "summary": "TMDB 自动订阅插件图标",
+                "description": "返回插件随包携带的 SVG 图标。",
+            },
             {
                 "path": "/scan",
                 "endpoint": self.api_scan,
