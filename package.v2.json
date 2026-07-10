@@ -4,7 +4,7 @@
     "description": "按 TMDB 新上映、新剧首播和老剧新季生成 MoviePilot 订阅建议，支持自动订阅、筛选配置、扫描进度和海报墙调试。",
     "labels": "订阅,TMDB,自动化",
     "version": "1.0.4",
-    "icon": "https://raw.githubusercontent.com/01dmt/MoviePilot-Plugins/main/icons/tmdbautosubscribe-256.png",
+    "icon": "https://cdn.jsdelivr.net/gh/01dmt/MoviePilot-Plugins@main/icons/tmdbautosubscribe-256.png",
     "author": "Codex",
     "level": 1,
     "system_version": ">=2.12.0",
