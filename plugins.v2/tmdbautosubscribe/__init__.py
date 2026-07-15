@@ -14,16 +14,16 @@ from urllib.request import HTTPSHandler, ProxyHandler, build_opener, urlopen
 from zoneinfo import ZoneInfo
 
 from fastapi.responses import Response
-
 from app.chain.subscribe import SubscribeChain
 from app.core.config import settings
+from app.db.subscribe_oper import SubscribeOper
 from app.log import logger
 from app.plugins import _PluginBase
 from app.schemas.types import MediaType, NotificationType
 
 
 PLUGIN_ICON_ASSET = "tmdbautosubscribe.svg"
-PLUGIN_ICON_URL = "../api/v1/plugin/TmdbAutoSubscribe/icon?v=1.0.8"
+PLUGIN_ICON_URL = "../api/v1/plugin/TmdbAutoSubscribe/icon?v=1.0.12"
 
 
 def _plugin_icon_response() -> Response:
@@ -229,6 +229,7 @@ class ScanAction:
     backdrop_path: Optional[str] = None
     overview: str = ""
     subscribed: bool = False
+    skipped_existing: bool = False
     subscribe_message: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
@@ -246,6 +247,7 @@ class ScanAction:
             "backdrop_url": _image_url(TMDB_BACKDROP_BASE, self.backdrop_path),
             "overview": self.overview,
             "subscribed": self.subscribed,
+            "skipped_existing": self.skipped_existing,
             "subscribe_message": self.subscribe_message,
         }
 
@@ -259,7 +261,7 @@ class TmdbAutoClient:
             base_url: str = "https://api.themoviedb.org/3",
             timeout: int = 10,
             retries: int = 2,
-            proxy_url: Optional[str] = None,
+            proxies: Optional[Dict[str, str]] = None,
     ):
         self.api_key = api_key
         self.language = language
@@ -268,14 +270,18 @@ class TmdbAutoClient:
         self.timeout = max(3, int(timeout or 10))
         self.retries = max(1, int(retries or 2))
         self.ssl_context = self._ssl_context()
-        self.proxy_url = str(proxy_url or "").strip()
+        self.proxies = {
+            str(scheme): str(proxy_url).strip()
+            for scheme, proxy_url in (proxies or {}).items()
+            if proxy_url
+        }
         self.opener = self._opener()
 
     def discover_movie(self, start: datetime.date, end: datetime.date, pages: int,
-                       filters: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+                       filters: Dict[str, Any], sort_mode: str = "popularity") -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         params = {
             **filters,
-            "sort_by": "primary_release_date.desc",
+            "sort_by": self._discover_sort(sort_mode, "primary_release_date.desc"),
             "primary_release_date.gte": start.isoformat(),
             "primary_release_date.lte": end.isoformat(),
             "region": self.region,
@@ -283,10 +289,10 @@ class TmdbAutoClient:
         return self._discover("/discover/movie", params, pages)
 
     def discover_tv_first_air(self, start: datetime.date, end: datetime.date, pages: int,
-                              filters: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+                              filters: Dict[str, Any], sort_mode: str = "popularity") -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         params = {
             **filters,
-            "sort_by": "first_air_date.desc",
+            "sort_by": self._discover_sort(sort_mode, "first_air_date.desc"),
             "first_air_date.gte": start.isoformat(),
             "first_air_date.lte": end.isoformat(),
         }
@@ -302,10 +308,11 @@ class TmdbAutoClient:
             max_pages: int,
             low_new_pages: int,
             min_new_items_per_page: int,
+            sort_mode: str = "popularity",
     ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         params = {
             **filters,
-            "sort_by": "air_date.desc",
+            "sort_by": self._discover_sort(sort_mode, "air_date.desc"),
             "air_date.gte": start.isoformat(),
             "air_date.lte": end.isoformat(),
         }
@@ -365,6 +372,10 @@ class TmdbAutoClient:
             "stop_reason": stop_reason,
             "page_stats": page_stats,
         }
+
+    @staticmethod
+    def _discover_sort(sort_mode: Any, date_sort: str) -> str:
+        return date_sort if str(sort_mode or "").strip() == "date" else "popularity.desc"
 
     def tv_detail(self, tmdb_id: int) -> Dict[str, Any]:
         return self._get(f"/tv/{tmdb_id}", {})
@@ -463,10 +474,10 @@ class TmdbAutoClient:
             return ssl.create_default_context()
 
     def _opener(self):
-        if not self.proxy_url:
+        if not self.proxies:
             return None
         return build_opener(
-            ProxyHandler({"http": self.proxy_url, "https": self.proxy_url}),
+            ProxyHandler(self.proxies),
             HTTPSHandler(context=self.ssl_context),
         )
 
@@ -475,7 +486,7 @@ class TmdbAutoSubscribe(_PluginBase):
     plugin_name = "TMDB自动订阅"
     plugin_desc = "按 TMDB 新上映、新剧首播和老剧新季生成 MoviePilot 订阅建议，支持自动订阅、缓存和细分筛选。"
     plugin_icon = PLUGIN_ICON_URL
-    plugin_version = "1.0.8"
+    plugin_version = "1.0.12"
     plugin_author = "01dmt"
     author_url = "https://github.com/01dmt"
     plugin_config_prefix = "tmdbautosubscribe_"
@@ -606,6 +617,7 @@ class TmdbAutoSubscribe(_PluginBase):
                                     self._switch("onlyonce", "立即运行一次", 3),
                                     self._switch("auto_subscribe", "自动订阅", 3),
                                     self._switch("notify", "启动通知", 3),
+                                    self._switch("skip_non_chinese_titles", "跳过非中文标题", 3),
                                 ]),
                                 self._row([
                                     self._number("lookback_days", "\u8fc7\u53bb\u626b\u63cf\u5929\u6570", 3),
@@ -639,6 +651,7 @@ class TmdbAutoSubscribe(_PluginBase):
                                                         {"component": "VListItem", "props": {"class": "px-0"}, "text": "TMDB API Key：留空时使用 MoviePilot 系统 TMDB 配置。"},
                                                         {"component": "VListItem", "props": {"class": "px-0"}, "text": "执行周期：定时扫描 cron 表达式。"},
                                                         {"component": "VListItem", "props": {"class": "px-0"}, "text": "清空缓存：下次初始化时清理筛选项和观察缓存。"},
+                                                        {"component": "VListItem", "props": {"class": "px-0"}, "text": "TMDB排序方式：按热度优先热门内容；按日期优先时间窗口内较新的内容。"},
                                                         {"component": "VListItem", "props": {"class": "px-0"}, "text": "电影/新剧页数：控制按上映/首播日期发现电影和新剧时最多拉取多少页。"},
                                                         {"component": "VListItem", "props": {"class": "px-0"}, "text": "播出最少页数/最多页数：控制老剧新季队列的自适应拉取范围。"},
                                                         {"component": "VListItem", "props": {"class": "px-0"}, "text": "低新连续页数：连续多页新增很少时提前停止拉取老剧新季。"},
@@ -652,15 +665,18 @@ class TmdbAutoSubscribe(_PluginBase):
                                             self._text("tmdb_api_key", "TMDB API Key", 6, "留空时尝试使用系统 TMDB 配置"),
                                             self._text("cron", "执行周期", 3, "cron，默认每天 09:00"),
                                             self._switch("clear_cache", "清空缓存", 3),
-                                            self._switch("use_proxy", "使用MP代理", 3),
                                         ]),
                                         self._row([
+                                            self._select("sort_mode", "TMDB排序方式", [
+                                                {"title": "按热度（默认）", "value": "popularity"},
+                                                {"title": "按日期", "value": "date"},
+                                            ], 3, clearable=False),
                                             self._number("discover_pages", "电影/新剧页数", 3),
                                             self._number("airing_min_pages", "播出最少页数", 3),
                                             self._number("airing_max_pages", "播出最多页数", 3),
-                                            self._number("low_new_pages", "低新连续页数", 3),
                                         ]),
                                         self._row([
+                                            self._number("low_new_pages", "低新连续页数", 3),
                                             self._number("min_new_items_per_page", "每页有效新数据", 3),
                                             self._number("tmdb_timeout", "TMDB超时秒数", 3),
                                             self._number("tmdb_retries", "TMDB重试次数", 3),
@@ -956,7 +972,9 @@ class TmdbAutoSubscribe(_PluginBase):
             f"媒体：{','.join(summary.get('media_types') or []) or '-'}\n"
             f"拉取页数：{pages}\n"
             f"候选 {summary.get('candidate_count', 0)}，建议 {summary.get('actions_count', 0)}，"
-            f"黑名单跳过 {summary.get('blacklist_skip_count', 0)}，详情错误 {summary.get('detail_error_count', 0)}\n"
+            f"黑名单跳过 {summary.get('blacklist_skip_count', 0)}，"
+            f"MP 已有跳过 {summary.get('existing_subscription_skip_count', 0)}，"
+            f"详情错误 {summary.get('detail_error_count', 0)}\n"
             f"建议分类：{action_text}\n"
             f"模式：{'自动订阅' if summary.get('auto_subscribe') else '仅生成建议'}"
         )
@@ -1008,11 +1026,18 @@ class TmdbAutoSubscribe(_PluginBase):
                     window_end,
                     pages=_as_int(config.get("discover_pages"), 3),
                     filters=movie_filters,
+                    sort_mode=config.get("sort_mode"),
                 ),
             )
             for movie in self._dedupe(movies):
                 if self._is_blacklisted("movie", movie.get("id"), config):
                     blacklist_skip_count += 1
+                    continue
+                if (
+                    config.get("skip_non_chinese_titles")
+                    and not self._has_chinese_title(movie.get("title") or movie.get("original_title"))
+                ):
+                    candidates.append(self._movie_candidate(movie, None, "标题缺少中文，已跳过"))
                     continue
                 action = self._analyze_movie(movie, window_start, window_end)
                 candidates.append(self._movie_candidate(movie, action))
@@ -1049,6 +1074,12 @@ class TmdbAutoSubscribe(_PluginBase):
 
             def process_tv_detail(detail: Dict[str, Any]):
                 tmdb_id = int(detail["id"])
+                if (
+                    config.get("skip_non_chinese_titles")
+                    and not self._has_chinese_title(detail.get("name") or detail.get("original_name"))
+                ):
+                    candidates.append(self._tv_candidate(detail, None, "标题缺少中文，已跳过"))
+                    return
                 tv_details[tmdb_id] = detail
                 action = self._analyze_tv(
                     detail,
@@ -1069,6 +1100,7 @@ class TmdbAutoSubscribe(_PluginBase):
                     window_end,
                     pages=_as_int(config.get("discover_pages"), 3),
                     filters=tv_filters,
+                    sort_mode=config.get("sort_mode"),
                 ),
             )
             stage("tv_airing", 52, "拉取近期播出剧集")
@@ -1083,6 +1115,7 @@ class TmdbAutoSubscribe(_PluginBase):
                     max_pages=_as_int(config.get("airing_max_pages"), 10),
                     low_new_pages=_as_int(config.get("low_new_pages"), 2),
                     min_new_items_per_page=_as_int(config.get("min_new_items_per_page"), 3),
+                    sort_mode=config.get("sort_mode"),
                 ),
             )
             tv_items = self._dedupe(first_air_items + airing_items)
@@ -1101,9 +1134,10 @@ class TmdbAutoSubscribe(_PluginBase):
 
         stage("actions", 90, "生成订阅建议")
         action_dicts = [self._action_dict(action, config) for action in actions]
+        existing_subscription_skip_count = 0
         if config.get("auto_subscribe"):
             stage("subscribe", 94, "提交 MoviePilot 订阅")
-            self._subscribe_actions(actions)
+            existing_subscription_skip_count = self._subscribe_actions(actions)
             action_dicts = [self._action_dict(action, config) for action in actions]
 
         stage("saving", 98, "保存扫描结果")
@@ -1127,6 +1161,7 @@ class TmdbAutoSubscribe(_PluginBase):
                 "queue_stats": queue_stats,
                 "detail_error_count": len(detail_errors),
                 "blacklist_skip_count": blacklist_skip_count,
+                "existing_subscription_skip_count": existing_subscription_skip_count,
             },
             "actions": action_dicts,
             "candidates": candidates,
@@ -1260,9 +1295,106 @@ class TmdbAutoSubscribe(_PluginBase):
                 )
         return None
 
-    def _subscribe_actions(self, actions: List[ScanAction]):
+    @staticmethod
+    def _subscription_field(subscription: Any, field: str) -> Any:
+        if isinstance(subscription, dict):
+            return subscription.get(field)
+        return getattr(subscription, field, None)
+
+    @staticmethod
+    def _subscription_key(
+            media_type: Any,
+            tmdb_id: Any,
+            season: Any = None,
+    ) -> Optional[Tuple[str, int, Optional[int]]]:
+        raw_type = getattr(media_type, "value", media_type)
+        type_text = str(raw_type or "").strip()
+        movie_value = str(getattr(MediaType.MOVIE, "value", MediaType.MOVIE))
+        tv_value = str(getattr(MediaType.TV, "value", MediaType.TV))
+        if type_text in {"movie", "电影", movie_value}:
+            normalized_type = "movie"
+        elif type_text in {"tv", "电视剧", tv_value}:
+            normalized_type = "tv"
+        else:
+            return None
+
+        try:
+            normalized_tmdb_id = int(tmdb_id)
+        except (TypeError, ValueError):
+            return None
+        if normalized_tmdb_id <= 0:
+            return None
+
+        if normalized_type == "movie":
+            return normalized_type, normalized_tmdb_id, None
+
+        try:
+            normalized_season = int(season)
+        except (TypeError, ValueError):
+            return None
+        if normalized_season <= 0:
+            return None
+        return normalized_type, normalized_tmdb_id, normalized_season
+
+    def _existing_subscription_keys(self) -> set:
+        try:
+            subscriptions = SubscribeOper().list()
+        except Exception as err:
+            logger.warning(f"TMDB 自动订阅读取 MoviePilot 订阅列表失败，本轮自动订阅已中止：{err}")
+            raise RuntimeError(f"读取订阅列表失败：{err}") from err
+
+        keys = set()
+        for subscription in subscriptions or []:
+            key = self._subscription_key(
+                self._subscription_field(subscription, "type"),
+                self._subscription_field(subscription, "tmdbid"),
+                self._subscription_field(subscription, "season"),
+            )
+            if key:
+                keys.add(key)
+        return keys
+
+    @staticmethod
+    def _chain_result_is_existing(message: Any) -> bool:
+        return "订阅已存在" in str(message or "")
+
+    @staticmethod
+    def _mark_existing_skip(
+            action: ScanAction,
+            key: Optional[Tuple[str, int, Optional[int]]],
+            existing_keys: set,
+    ) -> None:
+        action.subscribed = False
+        action.skipped_existing = True
+        action.subscribe_message = (
+            f"MP 已订阅第{action.season}季，已跳过"
+            if action.media_type == "tv"
+            else "MP 已订阅，已跳过"
+        )
+        if key:
+            existing_keys.add(key)
+
+    def _subscribe_actions(self, actions: List[ScanAction]) -> int:
+        try:
+            existing_keys = self._existing_subscription_keys()
+        except RuntimeError as err:
+            message = str(err)
+            for action in actions:
+                action.subscribed = False
+                action.skipped_existing = False
+                action.subscribe_message = message
+            return 0
+
+        skipped_count = 0
         chain = SubscribeChain()
         for action in actions:
+            action.skipped_existing = False
+            key = self._subscription_key(action.media_type, action.tmdb_id, action.season)
+            if key and key in existing_keys:
+                self._mark_existing_skip(action, key, existing_keys)
+                skipped_count += 1
+                continue
+
             try:
                 sid, msg = chain.add(
                     title=action.title,
@@ -1274,13 +1406,30 @@ class TmdbAutoSubscribe(_PluginBase):
                     exist_ok=True,
                     username="TMDB自动订阅",
                 )
+                if self._chain_result_is_existing(msg):
+                    self._mark_existing_skip(action, key, existing_keys)
+                    skipped_count += 1
+                    continue
+
                 action.subscribed = bool(sid)
                 action.subscribe_message = msg or ("已添加订阅" if sid else "未添加订阅")
+                if sid and key:
+                    existing_keys.add(key)
             except Exception as err:
                 action.subscribed = False
                 action.subscribe_message = str(err)
+        return skipped_count
 
-    def _movie_candidate(self, movie: Dict[str, Any], action: Optional[ScanAction]) -> Dict[str, Any]:
+    @staticmethod
+    def _has_chinese_title(title: Any) -> bool:
+        return any("\u4e00" <= char <= "\u9fff" for char in str(title or ""))
+
+    def _movie_candidate(
+            self,
+            movie: Dict[str, Any],
+            action: Optional[ScanAction],
+            debug_reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
         return {
             "media_type": "movie",
             "tmdb_id": int(movie["id"]),
@@ -1290,10 +1439,15 @@ class TmdbAutoSubscribe(_PluginBase):
             "overview": movie.get("overview") or "",
             "matched_actions": [action.kind] if action else [],
             "matched": bool(action),
-            "debug_reason": "已生成订阅建议" if action else "上映日期不在扫描窗口内",
+            "debug_reason": debug_reason or ("已生成订阅建议" if action else "上映日期不在扫描窗口内"),
         }
 
-    def _tv_candidate(self, detail: Dict[str, Any], action: Optional[ScanAction]) -> Dict[str, Any]:
+    def _tv_candidate(
+            self,
+            detail: Dict[str, Any],
+            action: Optional[ScanAction],
+            debug_reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
         seasons = [
             {
                 "season": season.get("season_number"),
@@ -1313,7 +1467,7 @@ class TmdbAutoSubscribe(_PluginBase):
             "seasons": seasons,
             "matched_actions": [action.kind] if action else [],
             "matched": bool(action),
-            "debug_reason": "已生成订阅建议" if action else "不是新剧首播或老剧新季",
+            "debug_reason": debug_reason or ("已生成订阅建议" if action else "不是新剧首播或老剧新季"),
         }
 
     def _update_registry(self, registry: Dict[str, Any], detail: Dict[str, Any], action: Optional[ScanAction]):
@@ -1461,6 +1615,8 @@ class TmdbAutoSubscribe(_PluginBase):
             "airing_max_pages": _as_int(config.get("airing_max_pages"), 10),
             "low_new_pages": _as_int(config.get("low_new_pages"), 2),
             "min_new_items_per_page": _as_int(config.get("min_new_items_per_page"), 3),
+            "sort_mode": "date" if config.get("sort_mode") == "date" else "popularity",
+            "skip_non_chinese_titles": _as_bool(config.get("skip_non_chinese_titles"), True),
             "tmdb_timeout": _as_int(config.get("tmdb_timeout"), 10),
             "tmdb_retries": _as_int(config.get("tmdb_retries"), 2),
         }
@@ -1494,6 +1650,7 @@ class TmdbAutoSubscribe(_PluginBase):
             f"排除电影类型 {TmdbAutoSubscribe._labeled_values(filters.get('exclude_movie_genres') or [], labels.get('movie_genres') or MOVIE_GENRE_LABELS)}；"
             f"国家 {TmdbAutoSubscribe._labeled_values(filters.get('origin_countries') or [], labels.get('origin_countries') or COUNTRY_LABELS)}；"
             f"语言 {TmdbAutoSubscribe._labeled_values(filters.get('original_languages') or [], labels.get('original_languages') or LANGUAGE_LABELS)}；"
+            f"排序 {'按日期' if filters.get('sort_mode') == 'date' else '按热度'}；"
             f"页数 {filters.get('discover_pages', '-')}/{filters.get('airing_min_pages', '-')}-{filters.get('airing_max_pages', '-')}；"
             f"超时 {filters.get('tmdb_timeout', '-')}s×{filters.get('tmdb_retries', '-')}"
         )
@@ -1521,20 +1678,8 @@ class TmdbAutoSubscribe(_PluginBase):
             base_url=base_url,
             timeout=_as_int(config.get("tmdb_timeout"), 10),
             retries=_as_int(config.get("tmdb_retries"), 2),
-            proxy_url=TmdbAutoSubscribe._tmdb_proxy_url(config),
+            proxies=getattr(settings, "PROXY", None),
         )
-
-    @staticmethod
-    def _tmdb_proxy_url(config: Dict[str, Any]) -> Optional[str]:
-        if not _as_bool(config.get("use_proxy"), True):
-            return None
-        proxy_host = getattr(settings, "PROXY_HOST", "") or ""
-        if proxy_host:
-            return str(proxy_host)
-        proxy = getattr(settings, "PROXY", None)
-        if isinstance(proxy, dict):
-            return str(proxy.get("https") or proxy.get("http") or "") or None
-        return None
 
     @staticmethod
     def _first_regular_season(detail: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -1644,10 +1789,12 @@ class TmdbAutoSubscribe(_PluginBase):
         merged.update(config or {})
         merged.pop("detail_dialog", None)
         merged.pop("long_gap_days", None)
+        merged.pop("use_proxy", None)
         for key in ("media_types", "tv_genres", "movie_genres", "exclude_tv_genres", "exclude_movie_genres", "origin_countries", "original_languages"):
             merged[key] = _as_list(merged.get(key))
         merged["blacklist"] = _as_blacklist(merged.get("blacklist"))
-        for key in ("enabled", "onlyonce", "auto_subscribe", "notify", "clear_cache", "use_proxy"):
+        merged["sort_mode"] = "date" if merged.get("sort_mode") == "date" else "popularity"
+        for key in ("enabled", "onlyonce", "auto_subscribe", "notify", "clear_cache", "skip_non_chinese_titles"):
             merged[key] = _as_bool(merged.get(key), self._default_config()[key])
         for key in ("lookback_days", "lookahead_days", "min_new_items_per_page"):
             merged[key] = _clamp_int(merged.get(key), self._default_config()[key], 0)
@@ -1666,14 +1813,15 @@ class TmdbAutoSubscribe(_PluginBase):
             "onlyonce": False,
             "auto_subscribe": False,
             "notify": False,
+            "skip_non_chinese_titles": True,
             "clear_cache": False,
-            "use_proxy": True,
             "tmdb_api_key": "",
             "language": "zh-CN",
             "region": "CN",
             "cron": "0 9 * * *",
             "lookback_days": 0,
             "lookahead_days": 7,
+            "sort_mode": "popularity",
             "discover_pages": 3,
             "airing_min_pages": 3,
             "airing_max_pages": 10,
@@ -1734,6 +1882,7 @@ class TmdbAutoSubscribe(_PluginBase):
             cols: int,
             multiple: bool = False,
             autocomplete: bool = False,
+            clearable: bool = True,
     ) -> dict:
         return {"component": "VCol", "props": {"cols": 12, "md": cols}, "content": [
             {"component": "VAutocomplete" if autocomplete else "VSelect", "props": {
@@ -1742,7 +1891,7 @@ class TmdbAutoSubscribe(_PluginBase):
                 "items": items,
                 "multiple": multiple,
                 "chips": multiple,
-                "clearable": True,
+                "clearable": clearable,
                 "hide-selected": False,
             }}
         ]}
