@@ -33,9 +33,25 @@
 
 详细的发现规则、配置说明与排障方法见 [插件说明](plugins.v2/tmdbautosubscribe/README.md)。
 
+## 订阅多版本
+
+适用于希望同一电视剧集保留多个发布版本，又不想改变 MoviePilot 原有订阅规则的人。
+
+- 普通版本仍由 MoviePilot 原订阅负责匹配和下载。
+- 普通版本进入下载器后，插件为相同季集创建独立的待补任务。
+- 使用单独选择的 MoviePilot 原生优先级规则组筛选目标版本，例如 Dolby Vision。
+- 沿用原订阅的站点范围、下载器、保存路径和自定义参数。
+- 支持目标版本与普通版同时发布，也支持目标版本稍后出现在 RSS 缓存中。
+- 可按电视剧二级分类或指定订阅限制观察范围，并在插件页面查看等待、命中和错误状态。
+
+插件专用规则组只应在“订阅多版本”设置中选择，不要加入普通订阅或 MoviePilot 的全局订阅规则组。将专用组设置为“电视剧 + 类别全部”只表示它可供插件处理所有电视剧分类，不会自动污染其他订阅的优先级。
+
+首次配置、规则组示例、工作流程与排障方法见 [插件说明](plugins.v2/subscribemultiversion/README.md)。
+
 ## 兼容性
 
-- MoviePilot：`>= 2.12.0`
+- TMDB自动订阅：MoviePilot `>= 2.12.0`
+- 订阅多版本：MoviePilot `>= 2.14.4, < 3`
 - TMDB：可使用 MoviePilot 全局 `TMDB_API_KEY`，也可在插件中单独填写。
 
 ## 仓库结构
@@ -44,9 +60,13 @@
 MoviePilot-Plugins/
 ├─ package.v2.json
 └─ plugins.v2/
-   └─ tmdbautosubscribe/
+   ├─ tmdbautosubscribe/
+   │  ├─ __init__.py
+   │  ├─ tmdbautosubscribe.svg
+   │  └─ README.md
+   └─ subscribemultiversion/
       ├─ __init__.py
-      ├─ tmdbautosubscribe.svg
+      ├─ subscribemultiversion.png
       └─ README.md
 ```
 
