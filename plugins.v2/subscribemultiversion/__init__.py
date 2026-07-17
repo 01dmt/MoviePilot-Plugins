@@ -33,7 +33,7 @@ _OBSERVER_ERROR = "subscribe_refresh observer compatibility error"
 _CACHE_READ_ERROR = "subscribe_refresh cache read failed"
 _ADAPTER_REFRESH_ERRORS = frozenset({_SCHEDULER_ERROR, _OBSERVER_ERROR})
 PLUGIN_ICON_ASSET = "subscribemultiversion.png"
-PLUGIN_ICON_URL = "../api/v1/plugin/SubscribeMultiVersion/icon?v=0.1.0"
+PLUGIN_ICON_URL = "../api/v1/plugin/SubscribeMultiVersion/icon?v=0.1.1"
 
 
 def _plugin_icon_response() -> Response:
@@ -53,7 +53,7 @@ class SubscribeMultiVersion(_PluginBase):
     plugin_name = "订阅多版本"
     plugin_desc = "为电视剧订阅按独立规则追补多个版本"
     plugin_icon = PLUGIN_ICON_URL
-    plugin_version = "0.1.0"
+    plugin_version = "0.1.1"
     plugin_author = "01dmt"
     plugin_order = 35
     auth_level = 1
