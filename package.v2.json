@@ -27,8 +27,8 @@
   "SubscribeMultiVersion": {
     "name": "订阅多版本",
     "description": "为电视剧订阅按独立规则追补多个版本",
-    "version": "0.1.1",
-    "icon": "https://github.com/01dmt/MoviePilot-Plugins/raw/5c415614605417f530da5255278e85a5bfc3e526/plugins.v2/subscribemultiversion/subscribemultiversion.png?v=0.1.1",
+    "version": "0.1.2",
+    "icon": "Moviepilot_A.png",
     "author": "01dmt",
     "level": 1,
     "system_version": ">=2.14.4,<3",
