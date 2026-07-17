@@ -19,6 +19,7 @@
 | 插件 | 当前版本 | 说明 |
 | --- | --- | --- |
 | [TMDB自动订阅](plugins.v2/tmdbautosubscribe/README.md) | `1.0.12` | 根据 TMDB 发现近期电影、新剧首播和老剧新季，生成或自动提交 MoviePilot 订阅。 |
+| [订阅多版本](plugins.v2/subscribemultiversion/README.md) | `0.1.0` | 在正常电视剧订阅下载后，按独立规则组追加目标版本。 |
 
 ## TMDB自动订阅
 

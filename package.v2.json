@@ -23,5 +23,15 @@
       "v1.0.1": "筛选选项拉取失败时缓存内置常用选项，避免 TMDB 超时导致配置页反复报错。",
       "v1.0.0": "V1.0 发布：支持电影、新剧首播、老剧新季、缓存观察、筛选配置、扫描进度和海报墙调试。"
     }
+  },
+  "SubscribeMultiVersion": {
+    "name": "订阅多版本",
+    "description": "为电视剧订阅按独立规则追补多个版本",
+    "version": "0.1.0",
+    "icon": "https://raw.githubusercontent.com/01dmt/MoviePilot-Plugins/main/plugins.v2/subscribemultiversion/subscribemultiversion.png?v=0.1.0",
+    "author": "01dmt",
+    "level": 1,
+    "system_version": ">=2.14.4,<3",
+    "release": false
   }
 }
