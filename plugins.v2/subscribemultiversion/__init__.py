@@ -11,7 +11,6 @@ from app.chain.torrents import TorrentsChain
 from app.core.config import settings
 from app.core.event import Event, eventmanager
 from app.db.subscribe_oper import SubscribeOper
-from app.helper.rule import RuleHelper
 from app.log import logger
 from app.plugins import _PluginBase
 from app.scheduler import Scheduler
@@ -33,7 +32,7 @@ _OBSERVER_ERROR = "subscribe_refresh observer compatibility error"
 _CACHE_READ_ERROR = "subscribe_refresh cache read failed"
 _ADAPTER_REFRESH_ERRORS = frozenset({_SCHEDULER_ERROR, _OBSERVER_ERROR})
 PLUGIN_ICON_ASSET = "subscribemultiversion.png"
-PLUGIN_ICON_URL = "../api/v1/plugin/SubscribeMultiVersion/icon?v=0.1.2"
+PLUGIN_ICON_URL = "../api/v1/plugin/SubscribeMultiVersion/icon?v=0.2.0"
 
 
 def _plugin_icon_response() -> Response:
@@ -51,9 +50,9 @@ def _plugin_icon_response() -> Response:
 
 class SubscribeMultiVersion(_PluginBase):
     plugin_name = "订阅多版本"
-    plugin_desc = "为电视剧订阅按独立规则追补多个版本"
+    plugin_desc = "为电视剧订阅追补当前最优的2160p杜比视界版本"
     plugin_icon = PLUGIN_ICON_URL
-    plugin_version = "0.1.2"
+    plugin_version = "0.2.0"
     plugin_author = "01dmt"
     plugin_order = 35
     auth_level = 1
@@ -81,12 +80,10 @@ class SubscribeMultiVersion(_PluginBase):
             )
             self._download_chain = DownloadChain()
             self._torrents_chain = TorrentsChain()
-            self._rule_helper = RuleHelper()
             self._scheduler = Scheduler()
             self._gateway = MoviePilotGateway(
                 chain=self._download_chain,
                 torrents_chain=self._torrents_chain,
-                rule_helper=self._rule_helper,
                 scheduler=self._scheduler,
                 site_resolver=SubscribeChain.get_sub_sites,
                 not_exist_factory=NotExistMediaInfo,
@@ -147,7 +144,6 @@ class SubscribeMultiVersion(_PluginBase):
         self._store = None
         self._download_chain = None
         self._torrents_chain = None
-        self._rule_helper = None
         self._scheduler = None
         self._gateway = None
         self._subscribe_oper = None
@@ -539,25 +535,6 @@ class SubscribeMultiVersion(_PluginBase):
             }
         ]
 
-    @staticmethod
-    def _ui_rule_groups(
-        rule_helper: Any,
-    ) -> tuple[tuple[Any, ...], bool]:
-        if rule_helper is None:
-            return (), True
-        try:
-            groups = rule_helper.get_rule_groups() or ()
-            return (
-                tuple(getattr(group, "name", None) for group in groups),
-                False,
-            )
-        except Exception as exc:
-            logger.warning(
-                "SubscribeMultiVersion UI rule options unavailable: error_type=%s",
-                type(exc).__name__,
-            )
-            return (), True
-
     @classmethod
     def _ui_categories(
         cls,
@@ -677,17 +654,8 @@ class SubscribeMultiVersion(_PluginBase):
             config = getattr(self, "_config", None) or PluginConfig()
             store = getattr(self, "_store", None)
             subscribe_oper = getattr(self, "_subscribe_oper", None)
-            rule_helper = getattr(self, "_rule_helper", None)
             chain = getattr(self, "chain", None)
 
-            if rule_helper is None:
-                try:
-                    rule_helper = RuleHelper()
-                except Exception as exc:
-                    logger.warning(
-                        "SubscribeMultiVersion UI rule helper unavailable: error_type=%s",
-                        type(exc).__name__,
-                    )
             if subscribe_oper is None:
                 try:
                     subscribe_oper = SubscribeOper()
@@ -698,7 +666,6 @@ class SubscribeMultiVersion(_PluginBase):
                         type(exc).__name__,
                     )
 
-            rule_groups, rule_failed = self._ui_rule_groups(rule_helper)
             categories, category_failed = self._ui_categories(chain)
             current_snapshots, current_failed = self._ui_current_snapshots(
                 subscribe_oper
@@ -712,8 +679,6 @@ class SubscribeMultiVersion(_PluginBase):
                 known_snapshots,
             )
             warnings = []
-            if rule_failed:
-                warnings.append("规则组")
             if category_failed:
                 warnings.append("二级分类")
             if current_failed:
@@ -722,7 +687,6 @@ class SubscribeMultiVersion(_PluginBase):
                 warnings.append("已选订阅")
             return build_form(
                 config,
-                rule_groups=rule_groups,
                 categories=categories,
                 subscriptions=subscriptions,
                 warnings=warnings,

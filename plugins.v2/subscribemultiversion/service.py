@@ -37,9 +37,7 @@ class CompanionService:
         decision = ScopePolicy(config).decide(snapshot)
         if not decision.in_scope:
             return ()
-        if self._gateway.context_matches_rule(
-            source_context, snapshot, config.rule_group
-        ):
+        if self._gateway.source_matches_target(source_context):
             return ()
 
         tasks = self._store.upsert(
@@ -93,17 +91,16 @@ class CompanionService:
 
                 pending = {task.episode for task in tasks}
                 try:
-                    contexts = self._gateway.filtered_candidates(
-                        snapshot, config.rule_group, cache
-                    )
+                    candidates = self._gateway.ranked_candidates(snapshot, cache)
                     usable = []
                     covered_episodes = set()
-                    for context in contexts:
+                    for candidate in candidates:
+                        context = candidate.context
                         coverage = candidate_episodes(context, season, pending)
                         if not coverage:
                             continue
                         context.allowed_episodes = coverage
-                        usable.append((context, coverage))
+                        usable.append((candidate, coverage))
                         covered_episodes.update(coverage)
                 except Exception as exc:
                     self._record_waiting_error(task_keys, now, exc, "candidate_filter")
@@ -155,7 +152,12 @@ class CompanionService:
 
                 adding_by_key = {}
                 try:
-                    for keys, fingerprint, candidate_title in metadata_plan:
+                    for (
+                        keys,
+                        fingerprint,
+                        candidate_title,
+                        classification,
+                    ) in metadata_plan:
                         changed = self._transition(
                             keys,
                             TaskStatus.ADDING,
@@ -163,6 +165,11 @@ class CompanionService:
                             reason="download_claim",
                             candidate_fingerprint=fingerprint,
                             candidate_title=candidate_title,
+                            candidate_profile=classification.profile,
+                            candidate_layer=classification.layer,
+                            candidate_source=classification.source,
+                            candidate_rank=classification.rank,
+                            candidate_evidence=classification.evidence,
                             expected_statuses={TaskStatus.MATCHING},
                             expected_claim_token=claim_token,
                         )
@@ -266,24 +273,32 @@ class CompanionService:
             return True
 
     def _metadata_plan(self, usable, claimed, claimed_episodes):
-        first_context = {}
-        for context, coverage in usable:
+        first_candidate = {}
+        for candidate, coverage in usable:
             for episode in coverage & claimed_episodes:
-                first_context.setdefault(episode, context)
+                first_candidate.setdefault(episode, candidate)
 
-        keys_by_context = {}
+        keys_by_candidate = {}
         for task in claimed:
-            context = first_context.get(task.episode)
-            if context is not None:
-                keys_by_context.setdefault(id(context), []).append(task.key)
+            candidate = first_candidate.get(task.episode)
+            if candidate is not None:
+                keys_by_candidate.setdefault(id(candidate), []).append(task.key)
 
         plan = []
-        for context, _coverage in usable:
-            keys = keys_by_context.pop(id(context), None)
+        for candidate, _coverage in usable:
+            keys = keys_by_candidate.pop(id(candidate), None)
             if not keys:
                 continue
+            context = candidate.context
             fingerprint, candidate_title = self._candidate_metadata(context)
-            plan.append((tuple(keys), fingerprint, candidate_title))
+            plan.append(
+                (
+                    tuple(keys),
+                    fingerprint,
+                    candidate_title,
+                    candidate.classification,
+                )
+            )
         return plan
 
     def _record_waiting_error(self, task_keys, now, exc, reason):
@@ -454,12 +469,17 @@ class CompanionService:
     @staticmethod
     def _contexts_for_episodes(usable, episodes):
         selected = []
-        for context, original_coverage in usable:
-            coverage = original_coverage & episodes
+        remaining = set(episodes)
+        for candidate, original_coverage in usable:
+            coverage = original_coverage & remaining
             if not coverage:
                 continue
+            context = candidate.context
             context.allowed_episodes = coverage
             selected.append(context)
+            remaining.difference_update(coverage)
+            if not remaining:
+                break
         return selected
 
     @staticmethod

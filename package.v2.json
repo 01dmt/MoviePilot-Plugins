@@ -26,12 +26,15 @@
   },
   "SubscribeMultiVersion": {
     "name": "订阅多版本",
-    "description": "为电视剧订阅按独立规则追补多个版本",
-    "version": "0.1.2",
+    "description": "为电视剧订阅追补当前最优的2160p杜比视界版本",
+    "version": "0.2.0",
     "icon": "Moviepilot_A.png",
     "author": "01dmt",
     "level": 1,
     "system_version": ">=2.14.4,<3",
-    "release": false
+    "release": false,
+    "history": {
+      "v0.2.0": "内置2160p杜比视界识别，按画质即时选择当前最优版本，不再需要MoviePilot规则组；已完成剧集不会后续升级。"
+    }
   }
 }

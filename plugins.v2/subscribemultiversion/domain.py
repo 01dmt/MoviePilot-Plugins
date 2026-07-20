@@ -5,7 +5,57 @@ from enum import Enum
 from types import SimpleNamespace
 from typing import Any, Optional
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+_MAX_CANDIDATE_EVIDENCE = 8
+_MAX_EVIDENCE_ITEMS_TO_INSPECT = 32
+_MAX_EVIDENCE_TOKEN_LENGTH = 64
+_CANDIDATE_PROFILES = frozenset({"p5", "p7", "p8", "unknown"})
+_CANDIDATE_LAYERS = frozenset({"fel", "mel", "unknown"})
+_CANDIDATE_SOURCES = frozenset({"remux", "web_dl", "other", "unknown"})
+_CANDIDATE_RANKS = frozenset({0, 100, 200, 300, 400, 500, 600, 700, 800})
+_CANDIDATE_EVIDENCE = frozenset(
+    {
+        "dv",
+        "2160p",
+        "profile:p5",
+        "profile:p7",
+        "profile:p8",
+        "layer:fel",
+        "layer:mel",
+        "source:remux",
+        "source:web_dl",
+        "source:other",
+    }
+)
+
+
+def _bounded_choice(value: Any, allowed: frozenset[str]) -> Optional[str]:
+    return value if isinstance(value, str) and value in allowed else None
+
+
+def _normalize_candidate_rank(value: Any) -> Optional[int]:
+    return value if type(value) is int and value in _CANDIDATE_RANKS else None
+
+
+def _normalize_candidate_evidence(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    normalized = []
+    for index, item in enumerate(value):
+        if index == _MAX_EVIDENCE_ITEMS_TO_INSPECT:
+            break
+        if (
+            not isinstance(item, str)
+            or not 1 <= len(item) <= _MAX_EVIDENCE_TOKEN_LENGTH
+        ):
+            continue
+        if item not in _CANDIDATE_EVIDENCE:
+            continue
+        normalized.append(item)
+        if len(normalized) == _MAX_CANDIDATE_EVIDENCE:
+            break
+    return tuple(normalized)
 
 
 class TaskStatus(str, Enum):
@@ -20,7 +70,6 @@ class TaskStatus(str, Enum):
 @dataclass(frozen=True)
 class PluginConfig:
     enabled: bool = False
-    rule_group: str = ""
     categories: tuple[str, ...] = ()
     watch_subscription_ids: tuple[int, ...] = ()
     watch_snapshot_keys: tuple[str, ...] = ()
@@ -48,7 +97,6 @@ class PluginConfig:
             days = 3.0
         return cls(
             enabled=enabled,
-            rule_group=str(value.get("rule_group") or ""),
             categories=tuple(
                 dict.fromkeys(
                     str(item) for item in (value.get("categories") or ()) if item
@@ -154,6 +202,36 @@ class CompanionTask:
     retry_count: int = 0
     last_error: Optional[str] = None
     claim_token: Optional[str] = None
+    candidate_profile: Optional[str] = None
+    candidate_layer: Optional[str] = None
+    candidate_source: Optional[str] = None
+    candidate_rank: Optional[int] = None
+    candidate_evidence: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "candidate_profile",
+            _bounded_choice(self.candidate_profile, _CANDIDATE_PROFILES),
+        )
+        object.__setattr__(
+            self,
+            "candidate_layer",
+            _bounded_choice(self.candidate_layer, _CANDIDATE_LAYERS),
+        )
+        object.__setattr__(
+            self,
+            "candidate_source",
+            _bounded_choice(self.candidate_source, _CANDIDATE_SOURCES),
+        )
+        object.__setattr__(
+            self, "candidate_rank", _normalize_candidate_rank(self.candidate_rank)
+        )
+        object.__setattr__(
+            self,
+            "candidate_evidence",
+            _normalize_candidate_evidence(self.candidate_evidence),
+        )
 
     @classmethod
     def create(
@@ -186,6 +264,7 @@ class CompanionTask:
     def to_dict(self) -> dict:
         data = asdict(self)
         data["status"] = self.status.value
+        data["candidate_evidence"] = list(self.candidate_evidence)
         for field_name in ("created_at", "deadline_at", "updated_at"):
             data[field_name] = getattr(self, field_name).isoformat()
         return data
@@ -193,6 +272,13 @@ class CompanionTask:
     @classmethod
     def from_dict(cls, value: dict) -> "CompanionTask":
         data = dict(value)
+        data.setdefault("candidate_profile", None)
+        data.setdefault("candidate_layer", None)
+        data.setdefault("candidate_source", None)
+        data.setdefault("candidate_rank", None)
+        data["candidate_evidence"] = _normalize_candidate_evidence(
+            data.get("candidate_evidence")
+        )
         data["status"] = TaskStatus(data["status"])
         for field_name in ("created_at", "deadline_at", "updated_at"):
             data[field_name] = datetime.fromisoformat(data[field_name])

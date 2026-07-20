@@ -27,6 +27,15 @@ _IN_FLIGHT_STATUSES = frozenset({TaskStatus.MATCHING, TaskStatus.ADDING})
 _UNSET = object()
 
 
+def _load_collection(payload: dict, field_name: str) -> dict:
+    value = payload.get(field_name)
+    if value is None:
+        return {}
+    if type(value) is not dict:
+        raise ValueError(f"Invalid task store {field_name}: expected dict")
+    return value
+
+
 class TaskStore:
     def __init__(
         self, load: Callable[[], Optional[dict]], save: Callable[[dict], None]
@@ -37,13 +46,24 @@ class TaskStore:
         self._persisting = False
         self._mutation_depth = 0
         with self._lock:
-            payload = load() or {}
-            version = int(payload.get("schema_version", SCHEMA_VERSION))
-            if version != SCHEMA_VERSION:
+            loaded = load()
+            if loaded is None:
+                payload = {}
+            elif type(loaded) is not dict:
+                raise ValueError("Invalid task store payload: expected dict")
+            else:
+                payload = loaded
+            version = payload.get("schema_version", 1)
+            if type(version) is not int or version not in (1, SCHEMA_VERSION):
                 raise ValueError(f"Unsupported task schema version: {version}")
+            tasks_payload = _load_collection(payload, "tasks")
+            snapshots_payload = _load_collection(payload, "snapshots")
+            completion_snapshots_payload = _load_collection(
+                payload, "completion_snapshots"
+            )
             self._tasks = {
                 key: CompanionTask.from_dict(value)
-                for key, value in (payload.get("tasks") or {}).items()
+                for key, value in tasks_payload.items()
             }
             for key, task in tuple(self._tasks.items()):
                 if task.last_error is not None:
@@ -52,11 +72,11 @@ class TaskStore:
                     )
             self._snapshots = {
                 key: DownloadContextSnapshot.from_dict(value)
-                for key, value in (payload.get("snapshots") or {}).items()
+                for key, value in snapshots_payload.items()
             }
             completion_snapshots = (
                 DownloadContextSnapshot.from_dict(value)
-                for value in (payload.get("completion_snapshots") or {}).values()
+                for value in completion_snapshots_payload.values()
             )
             self._completion_snapshots = {
                 str(snapshot.subscription_id): snapshot
@@ -282,6 +302,11 @@ class TaskStore:
         *,
         candidate_fingerprint: Any = _UNSET,
         candidate_title: Any = _UNSET,
+        candidate_profile: Any = _UNSET,
+        candidate_layer: Any = _UNSET,
+        candidate_source: Any = _UNSET,
+        candidate_rank: Any = _UNSET,
+        candidate_evidence: Any = _UNSET,
         last_error: Any = _UNSET,
         claim_token: Any = _UNSET,
         expected_statuses: Optional[Iterable[TaskStatus]] = None,
@@ -309,6 +334,16 @@ class TaskStore:
                     changes["candidate_fingerprint"] = candidate_fingerprint
                 if candidate_title is not _UNSET:
                     changes["candidate_title"] = candidate_title
+                if candidate_profile is not _UNSET:
+                    changes["candidate_profile"] = candidate_profile
+                if candidate_layer is not _UNSET:
+                    changes["candidate_layer"] = candidate_layer
+                if candidate_source is not _UNSET:
+                    changes["candidate_source"] = candidate_source
+                if candidate_rank is not _UNSET:
+                    changes["candidate_rank"] = candidate_rank
+                if candidate_evidence is not _UNSET:
+                    changes["candidate_evidence"] = candidate_evidence
                 if last_error is not _UNSET:
                     safe_last_error = (
                         redact_diagnostic(last_error)

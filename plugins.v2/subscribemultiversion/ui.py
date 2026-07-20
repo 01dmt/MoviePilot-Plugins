@@ -25,6 +25,9 @@ _PAGE_HEADERS = [
     {"title": "创建时间", "key": "created_at"},
     {"title": "截止/剩余时间", "key": "deadline"},
     {"title": "候选标题", "key": "candidate_title"},
+    {"title": "DV 版本", "key": "dv_variant"},
+    {"title": "DV 排名", "key": "dv_rank"},
+    {"title": "DV 依据", "key": "dv_evidence"},
     {"title": "重试次数", "key": "retry_count"},
     {"title": "最后错误", "key": "last_error"},
 ]
@@ -35,6 +38,7 @@ _TASK_TITLE_LIMIT = 200
 _CATEGORY_LIMIT = 120
 _SCOPE_REASON_LIMIT = 240
 _CANDIDATE_TITLE_LIMIT = 300
+_DV_EVIDENCE_LIMIT = 240
 _ALERT_TEXT_LIMIT = 1000
 _ERROR_TEXT_LIMIT = 1000
 
@@ -169,7 +173,6 @@ def _provider_warning(warnings: Optional[Iterable[Any]]) -> Optional[dict[str, A
 
 def build_form(
     config: PluginConfig,
-    rule_groups: Iterable[Any],
     categories: Iterable[Any],
     subscriptions: Iterable[Any],
     warnings: Optional[Iterable[Any]] = None,
@@ -183,15 +186,6 @@ def build_form(
                     _control_column(
                         "VSwitch",
                         {"model": "enabled", "label": "启用插件"},
-                        md=3,
-                    ),
-                    _control_column(
-                        "VSelect",
-                        {
-                            "model": "rule_group",
-                            "label": "规则组",
-                            "items": _text_options(rule_groups),
-                        },
                         md=3,
                     ),
                     _control_column(
@@ -235,7 +229,6 @@ def build_form(
     elements = [form] if warning is None else [warning, form]
     defaults = {
         "enabled": config.enabled,
-        "rule_group": config.rule_group,
         "categories": list(config.categories),
         "watch_subscription_ids": list(config.watch_subscription_ids),
         "watch_days": config.watch_days,
@@ -283,6 +276,12 @@ def _status_value(status: Any) -> str:
 def _status_label(status: Any) -> str:
     value = _status_value(status)
     return _STATUS_LABELS.get(value, value)
+
+
+def _dv_code_label(value: Any) -> str:
+    if value in (None, "unknown"):
+        return "未知"
+    return _text(value, "未知").upper()
 
 
 def _remaining_text(
@@ -338,6 +337,17 @@ def _task_item(
     now: Optional[datetime],
     display_timezone: tzinfo,
 ) -> dict[str, Any]:
+    profile = _dv_code_label(task.candidate_profile)
+    layer = _dv_code_label(task.candidate_layer)
+    source = {
+        "remux": "Remux",
+        "web_dl": "WEB-DL",
+        "other": "Other",
+    }.get(task.candidate_source, "未知")
+    evidence = _truncate(
+        ", ".join(task.candidate_evidence) or "-",
+        _DV_EVIDENCE_LIMIT,
+    )
     return {
         "title": _truncate(
             _text(getattr(snapshot, "name", None)),
@@ -364,6 +374,9 @@ def _task_item(
             _text(task.candidate_title),
             _CANDIDATE_TITLE_LIMIT,
         ),
+        "dv_variant": f"{profile} / {layer} / {source}",
+        "dv_rank": task.candidate_rank if task.candidate_rank is not None else "-",
+        "dv_evidence": evidence,
         "retry_count": task.retry_count,
         "last_error": _truncate(
             _error_text(redact_diagnostic(task.last_error)),

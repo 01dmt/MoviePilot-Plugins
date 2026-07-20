@@ -4,7 +4,8 @@ import json
 import unicodedata
 from collections.abc import Collection, Mapping
 from decimal import Decimal, InvalidOperation
-from types import SimpleNamespace
+
+from .dv import RankedCandidate, classify_dv
 
 
 class MoviePilotGateway:
@@ -12,19 +13,19 @@ class MoviePilotGateway:
         self,
         chain,
         torrents_chain,
-        rule_helper,
         scheduler,
         site_resolver,
         not_exist_factory,
         candidate_matcher,
+        classifier=classify_dv,
     ):
         self._chain = chain
         self._torrents = torrents_chain
-        self._rules = rule_helper
         self._scheduler = scheduler
         self._site_resolver = site_resolver
         self._not_exist_factory = not_exist_factory
         self._candidate_matcher = candidate_matcher
+        self._classifier = classifier
 
     def progress(self):
         return self._scheduler.get_progress("subscribe_refresh")
@@ -32,76 +33,35 @@ class MoviePilotGateway:
     def load_cache(self):
         return self._torrents.get_torrents() or {}
 
-    def context_matches_rule(self, context, snapshot, rule_group) -> bool:
-        signature = self._rule_signature(snapshot, rule_group)
-        if signature is None:
-            return False
+    def source_matches_target(self, context) -> bool:
+        return self._classifier(copy.deepcopy(context)).eligible
 
-        copied = copy.deepcopy(context)
-        copied.media_info.category = snapshot.category
-        copied.media_info.episode_group = snapshot.episode_group
-        result = self._chain.filter_torrents(
-            rule_groups=[rule_group],
-            torrent_list=[copied.torrent_info],
-            mediainfo=copied.media_info,
-        )
-        if self._rule_signature(snapshot, rule_group) != signature:
-            return False
-        return bool(result)
-
-    def filtered_candidates(self, snapshot, rule_group, cache):
-        signature = self._rule_signature(snapshot, rule_group)
-        if signature is None:
-            raise ValueError(
-                f"DV rule group is unavailable: {rule_group or '<empty>'}"
-            )
-
+    def ranked_candidates(self, snapshot, cache):
         subscribe = snapshot.to_subscribe_proxy()
-        contexts = [
-            copy.deepcopy(context)
-            for site_contexts in (cache or {}).values()
-            for context in (site_contexts or [])
-            if context and self._candidate_matcher(context, subscribe)
-        ]
-
-        allowed_sites = set(
-            self._site_resolver(snapshot.to_subscribe_proxy()) or []
+        allowed_sites = set(self._site_resolver(subscribe) or [])
+        ranked = []
+        for site_contexts in (cache or {}).values():
+            for context in site_contexts or []:
+                if not context or not self._candidate_matcher(context, subscribe):
+                    continue
+                if allowed_sites and (
+                    getattr(getattr(context, "torrent_info", None), "site", None)
+                    not in allowed_sites
+                ):
+                    continue
+                if getattr(context, "media_info", None) is None:
+                    continue
+                copied = copy.deepcopy(context)
+                copied.media_info.category = snapshot.category
+                copied.media_info.episode_group = snapshot.episode_group
+                classification = self._classifier(copied)
+                if classification.eligible:
+                    ranked.append(RankedCandidate(copied, classification))
+        return sorted(
+            ranked,
+            key=lambda candidate: candidate.classification.rank,
+            reverse=True,
         )
-        if allowed_sites:
-            contexts = [
-                context
-                for context in contexts
-                if getattr(context.torrent_info, "site", None) in allowed_sites
-            ]
-
-        for context in contexts:
-            context.media_info.category = snapshot.category
-            context.media_info.episode_group = snapshot.episode_group
-
-        if not contexts:
-            return []
-
-        torrent_to_context = {
-            id(context.torrent_info): context for context in contexts
-        }
-        filtered = self._chain.filter_torrents(
-            rule_groups=[rule_group],
-            torrent_list=[context.torrent_info for context in contexts],
-            mediainfo=contexts[0].media_info,
-        )
-        if filtered is None:
-            raise ValueError(
-                f"DV rule group returned no filter result: {rule_group}"
-            )
-        if self._rule_signature(snapshot, rule_group) != signature:
-            raise ValueError(
-                f"DV rule group changed during filtering: {rule_group}"
-            )
-        return [
-            torrent_to_context[id(torrent)]
-            for torrent in filtered
-            if id(torrent) in torrent_to_context
-        ]
 
     def fingerprint(self, context):
         torrent = getattr(context, "torrent_info", None)
@@ -170,57 +130,6 @@ class MoviePilotGateway:
         if added and not downloads:
             raise ValueError("batch_download reported progress without downloads")
         return added
-
-    def _rule_signature(self, snapshot, rule_group):
-        if not isinstance(rule_group, str) or not rule_group.strip():
-            return None
-
-        get_group = getattr(self._rules, "get_rule_group", None)
-        get_by_media = getattr(self._rules, "get_rule_group_by_media", None)
-        if not callable(get_group) or not callable(get_by_media):
-            return None
-
-        try:
-            group = get_group(rule_group)
-            signature = self._group_signature(group)
-            if (
-                signature is None
-                or signature[0] != rule_group
-                or not isinstance(signature[1], str)
-                or not signature[1].strip()
-            ):
-                return None
-            applicable = get_by_media(
-                media=self._snapshot_media(snapshot),
-                group_names=[rule_group],
-            )
-        except Exception:
-            return None
-
-        for candidate in applicable or []:
-            if self._group_signature(candidate) == signature:
-                return signature
-        return None
-
-    @staticmethod
-    def _group_signature(group):
-        if group is None:
-            return None
-        return (
-            getattr(group, "name", None),
-            getattr(group, "rule_string", None),
-            getattr(group, "media_type", None),
-            getattr(group, "category", None),
-        )
-
-    @staticmethod
-    def _snapshot_media(snapshot):
-        media_type = getattr(snapshot, "media_type", None)
-        media_type = getattr(media_type, "value", media_type)
-        return SimpleNamespace(
-            type=SimpleNamespace(value=media_type),
-            category=getattr(snapshot, "category", None),
-        )
 
     @classmethod
     def _remaining_episodes(cls, tree, *, mid, season, requested):
